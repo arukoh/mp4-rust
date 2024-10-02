@@ -6,9 +6,17 @@ use crate::mp4box::meta::MetaBox;
 use crate::mp4box::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+pub struct UserDefinedBox {
+    pub name: String,
+    pub size: u64,
+    pub data: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct UdtaBox {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<MetaBox>,
+    pub children: Vec<UserDefinedBox>,
 }
 
 impl UdtaBox {
@@ -22,6 +30,10 @@ impl UdtaBox {
             size += meta.box_size();
         }
         size
+    }
+
+    pub fn get_children(&self) -> &Vec<UserDefinedBox> {
+        &self.children
     }
 }
 
@@ -48,6 +60,7 @@ impl<R: Read + Seek> ReadBox<&mut R> for UdtaBox {
         let start = box_start(reader)?;
 
         let mut meta = None;
+        let mut children = Vec::new();
 
         let mut current = reader.stream_position()?;
         let end = start + size;
@@ -67,7 +80,9 @@ impl<R: Read + Seek> ReadBox<&mut R> for UdtaBox {
                 }
                 _ => {
                     // XXX warn!()
-                    skip_box(reader, s)?;
+                    let mut data = vec![0; (s - 8) as usize];
+                    reader.read_exact(&mut data)?;
+                    children.push(UserDefinedBox { name: name.to_string(), size: s, data });
                 }
             }
 
@@ -76,7 +91,7 @@ impl<R: Read + Seek> ReadBox<&mut R> for UdtaBox {
 
         skip_bytes_to(reader, start + size)?;
 
-        Ok(UdtaBox { meta })
+        Ok(UdtaBox { meta, children })
     }
 }
 
@@ -100,7 +115,7 @@ mod tests {
 
     #[test]
     fn test_udta_empty() {
-        let src_box = UdtaBox { meta: None };
+        let src_box = UdtaBox { meta: None, children: Vec::new() };
 
         let mut buf = Vec::new();
         src_box.write_box(&mut buf).unwrap();
@@ -119,6 +134,7 @@ mod tests {
     fn test_udta() {
         let src_box = UdtaBox {
             meta: Some(MetaBox::default()),
+            children: Vec::new(),
         };
 
         let mut buf = Vec::new();
